@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+// ---------------------------- STATES ----------------------------
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum GameState {
     #[default]
@@ -16,28 +17,18 @@ enum GameState {
     Playing,
     Paused,
     GameOver,
+    Leaderboard,
 }
 
+// ---------------------------- GAME SETTINGS ----------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GameMode {
-    Endless,
-    TimeAttack,
-    Checkpoints,
-}
+enum GameMode {Endless, TimeAttack, Checkpoints}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Difficulty {
-    Easy,
-    Normal,
-    Hard,
-}
+enum Difficulty {Easy, Normal, Hard}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Theme {
-    Classic,
-    HighContrast,
-    Minimal,
-}
+enum Theme {Classic, HighContrast, Minimal}
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 struct PlayerProfile {
@@ -90,6 +81,7 @@ impl Default for GameSettings {
     }
 }
 
+// ---------------------------- SERIALIZATION ----------------------------
 impl Serialize for GameMode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -174,8 +166,8 @@ impl<'de> Deserialize<'de> for Theme {
     }
 }
 
+// ---------------------------- MAIN ----------------------------
 fn main() {
-    // Wire up window, resources, state machine, and per-state systems
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -197,6 +189,8 @@ fn main() {
         .add_systems(OnExit(GameState::MainMenu), cleanup_menu::<MainMenuMarker>)
         .add_systems(OnEnter(GameState::SaveSelect), setup_save_select_ui)
         .add_systems(OnExit(GameState::SaveSelect), cleanup_menu::<SaveSelectMarker>)
+        .add_systems(OnEnter(GameState::Leaderboard), setup_leaderboard_ui)
+        .add_systems(OnExit(GameState::Leaderboard), cleanup_menu::<LeaderboardMarker>)
         .add_systems(OnEnter(GameState::ModeSelect), setup_mode_select_ui)
         .add_systems(OnExit(GameState::ModeSelect), cleanup_menu::<ModeSelectMarker>)
         .add_systems(OnEnter(GameState::DifficultySelect), setup_difficulty_select_ui)
@@ -218,10 +212,19 @@ fn main() {
             update_ui.run_if(in_state(GameState::Playing)),
             update_time_attack.run_if(in_state(GameState::Playing)),
             handle_game_over.run_if(in_state(GameState::GameOver)),
+            leaderboard_system.run_if(in_state(GameState::Leaderboard)),
         ))
         .run();
 }
-//BIRD
+
+#[derive(Serialize, Deserialize, Clone)]
+struct LeaderboardEntry {
+    name: String,
+    score: u32,
+    mode: GameMode,
+    difficulty: Difficulty,
+}
+
 // Marker components for menu cleanup
 #[derive(Component)]
 struct MainMenuMarker;
@@ -240,6 +243,88 @@ struct ThemeSelectMarker;
 
 #[derive(Component)]
 struct GameOverMarker;
+
+fn load_leaderboard() -> Vec<LeaderboardEntry> {
+    let mut entries = Vec::new();
+
+    for slot in 1..=3 {
+        if let Some(save) = load_save_slot(slot) {
+            entries.push(LeaderboardEntry {
+                name: save.profile.name.clone(),
+                score: save.score,
+                mode: save.mode,
+                difficulty: save.difficulty,
+            });
+        }
+    }
+
+    // Sort descending by score
+    entries.sort_by(|a, b| b.score.cmp(&a.score));
+    entries
+}
+
+#[derive(Component)]
+struct LeaderboardMarker;
+
+fn setup_leaderboard_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let entries = load_leaderboard();
+
+    commands.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        LeaderboardMarker,
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("LEADERBOARD"),
+            TextFont {
+                font_size: 48.0,
+                ..default()
+            },
+            TextColor(Color::WHITE),
+            Node { margin: UiRect::all(Val::Px(20.0)), ..default() },
+        ));
+
+        for (i, entry) in entries.iter().enumerate() {
+            parent.spawn((
+                Text::new(format!(
+                    "{}. {} - {} pts [{:?} {:?}]",
+                    i + 1,
+                    entry.name,
+                    entry.score,
+                    entry.mode,
+                    entry.difficulty
+                )),
+                TextFont { font_size: 28.0, ..default() },
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                Node { margin: UiRect::all(Val::Px(5.0)), ..default() },
+            ));
+        }
+
+        parent.spawn((
+            Text::new("Press ESC to return"),
+            TextFont { font_size: 24.0, ..default() },
+            TextColor(Color::srgb(0.7, 0.7, 0.7)),
+            Node { margin: UiRect::top(Val::Px(20.0)), ..default() },
+        ));
+    });
+}
+
+fn leaderboard_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        next_state.set(GameState::MainMenu);
+    }
+}
+
 
 // Save system setup
 fn setup_save_system(_commands: Commands) {
@@ -331,6 +416,7 @@ fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         MainMenuMarker,
     ))
     .with_children(|parent| {
+
         parent.spawn((
             Text::new("FLAPPY BIRD"),
             TextFont {
@@ -352,6 +438,16 @@ fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
             },
             TextColor(Color::srgb(0.8, 0.8, 0.8)),
         ));
+
+        parent.spawn((
+            Text::new("Press F1 to View Leaderboard"),
+            TextFont {
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+        ));
+
     });
 }
 
@@ -361,6 +457,10 @@ fn main_menu_system(
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         next_state.set(GameState::SaveSelect);
+    }
+
+    if keyboard.just_pressed(KeyCode::F1) {
+    next_state.set(GameState::Leaderboard);
     }
 }
 
@@ -780,6 +880,7 @@ fn theme_select_system(
         }
     }
 }
+// BIRD
 const PIXEL_RATIO: f32 = 4.;
 const FLAP_FORCE: f32 = 500.;
 const GRAVITY: f32 = 2000.;

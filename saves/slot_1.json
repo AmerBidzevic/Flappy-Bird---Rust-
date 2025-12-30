@@ -2,14 +2,14 @@
   "slot_number": 1,
   "profile": {
     "name": "Player 1",
-    "high_score": 48,
-    "total_games": 23,
-    "average_score": 8.434783,
+    "high_score": 32,
+    "total_games": 4,
+    "average_score": 8.75,
     "longest_survival": 0.0
   },
   "mode": "Endless",
   "difficulty": "Easy",
   "theme": "Classic",
-  "score": 4,
+  "score": 0,
   "survival_time": 0.0
 }

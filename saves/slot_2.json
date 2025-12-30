@@ -2,14 +2,14 @@
   "slot_number": 2,
   "profile": {
     "name": "Player 2",
-    "high_score": 29,
-    "total_games": 7,
-    "average_score": 6.142857,
+    "high_score": 13,
+    "total_games": 3,
+    "average_score": 4.3333335,
     "longest_survival": 0.0
   },
-  "mode": "Checkpoints",
+  "mode": "Endless",
   "difficulty": "Hard",
-  "theme": "Minimal",
-  "score": 0,
+  "theme": "Classic",
+  "score": 13,
   "survival_time": 0.0
 }
