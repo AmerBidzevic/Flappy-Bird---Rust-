@@ -2,7 +2,6 @@
 
 A small Flappy Bird remake in Rust/Bevy with multiple modes, difficulties, themes, and save slots.
 
-Current gameplay capture:
 ![Gameplay](https://github.com/AmerBidzevic/Flappy-Bird---Rust-/blob/main/assets/Gameplay.png?raw=true)
 
 ## Current features
