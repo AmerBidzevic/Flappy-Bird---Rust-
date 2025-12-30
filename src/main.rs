@@ -1,4 +1,6 @@
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
+use bevy::window::{PrimaryWindow, Window};
+use bevy::color::palettes::css::AQUA;
 use bevy::audio::Volume;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
@@ -15,7 +17,7 @@ enum GameState {
     DifficultySelect,
     ThemeSelect,
     Playing,
-    Paused,
+//    Paused,
     GameOver,
     Leaderboard,
 }
@@ -390,9 +392,22 @@ fn cleanup_game(
 }
 
 // Main Menu UI
-fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>,) {
     // Neutral background for menus so theme colors from gameplay don't stick
-    commands.insert_resource(ClearColor(Color::srgb(0.08, 0.08, 0.1)));
+    let window = window_query.single().expect("Missing primary window");
+    let window_width = window.width();
+    let window_height = window.height();
+
+    commands.spawn((
+                Sprite {
+                    image: asset_server.load("Background2.png"),
+                    custom_size: Some(Vec2::new(window_width, window_height)),
+                    ..default()
+                },
+                Transform::from_translation(Vec3::new(0.0, 0.0, -50.0)),
+                Background,
+                MainMenuMarker,
+            ));
 
     // Loop menu music
     commands.spawn((
@@ -420,10 +435,12 @@ fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         parent.spawn((
             Text::new("FLAPPY BIRD"),
             TextFont {
-                font_size: 64.0,
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 80.0,
                 ..default()
             },
-            TextColor(Color::WHITE),
+            TextShadow::default(),
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
             Node {
                 margin: UiRect::all(Val::Px(20.0)),
                 ..default()
@@ -431,21 +448,25 @@ fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
         ));
         
         parent.spawn((
-            Text::new("Press SPACE to Start"),
+            Text::new("Start Game [Space]"),
             TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
                 font_size: 32.0,
                 ..default()
             },
-            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            TextShadow::default(),
+            TextColor(AQUA.into()),
         ));
 
         parent.spawn((
-            Text::new("Press F1 to View Leaderboard"),
+            Text::new("Leaderboard [F1]"),
             TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
                 font_size: 32.0,
                 ..default()
             },
-            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            TextShadow::default(),
+            TextColor(AQUA.into()),
         ));
 
     });
