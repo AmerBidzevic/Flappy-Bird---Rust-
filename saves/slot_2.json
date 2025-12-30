@@ -1,0 +1,15 @@
+{
+  "slot_number": 2,
+  "profile": {
+    "name": "Player 2",
+    "high_score": 29,
+    "total_games": 7,
+    "average_score": 6.142857,
+    "longest_survival": 0.0
+  },
+  "mode": "Checkpoints",
+  "difficulty": "Hard",
+  "theme": "Minimal",
+  "score": 0,
+  "survival_time": 0.0
+}

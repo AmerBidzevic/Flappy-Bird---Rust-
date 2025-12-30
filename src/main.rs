@@ -1,4 +1,5 @@
 use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::audio::Volume;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -310,9 +311,12 @@ fn setup_main_menu_ui(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     // Loop menu music
     commands.spawn((
-        AudioPlayer::new(asset_server.load("35-Lost-Woods.ogg")),
-        PlaybackSettings::LOOP,
-        MainMenuMarker,
+    AudioPlayer::new(asset_server.load("35-Lost-Woods.ogg")),
+    PlaybackSettings {
+        volume: Volume::Linear(0.1),
+        ..PlaybackSettings::LOOP
+    },
+    MainMenuMarker,
     ));
 
     commands.spawn((
@@ -1100,7 +1104,13 @@ fn update_bird(
         // Input + physics
         if keys.just_pressed(KeyCode::Space) {
             bird.velocity = FLAP_FORCE * tuning.flap_mult;
-            commands.spawn(AudioPlayer::new(sound_effects.flap.clone()));
+            commands.spawn((
+            AudioPlayer::new(sound_effects.flap.clone()),
+            PlaybackSettings {
+                volume: Volume::Linear(0.1),
+                ..PlaybackSettings::DESPAWN
+        }
+        ));
         }
 
         bird.velocity -= time.delta_secs() * GRAVITY * tuning.gravity_mult;
@@ -1124,7 +1134,13 @@ fn update_bird(
                             score.best = score.current;
                         }
                         obstacle.scored = true;
-                        commands.spawn(AudioPlayer::new(sound_effects.point.clone()));
+                        commands.spawn((
+                            AudioPlayer::new(sound_effects.point.clone()),
+                            PlaybackSettings {
+                                volume: Volume::Linear(0.1),
+                                ..PlaybackSettings::DESPAWN // Fix for overlapping sounds and volume adjusted
+                            }     
+                        ));
                     }
                 }
 
@@ -1140,12 +1156,18 @@ fn update_bird(
         }
         
         if dead {
-            commands.spawn(AudioPlayer::new(sound_effects.die.clone()));
-            
+            commands.spawn((
+                AudioPlayer::new(sound_effects.die.clone()),
+                PlaybackSettings {
+                    volume: Volume::Linear(0.1),
+                    ..PlaybackSettings::DESPAWN
+            }
+            ));
+
             // Save game data
             if let Some(slot_num) = settings.current_slot {
                  let save_data = load_save_slot(slot_num as u32);
-                let mut profile = save_data.map(|s| s.profile).unwrap_or_else(|| PlayerProfile {
+                    let mut profile = save_data.map(|s| s.profile).unwrap_or_else(|| PlayerProfile {
                     name: format!("Player {}", slot_num),
                     high_score: 0,
                     total_games: 0,
@@ -1302,8 +1324,14 @@ fn reset_on_play_start(
     mut score: ResMut<Score>,
 ) {
     // Reset player state and respawn pipes before a new run
-    commands.spawn(AudioPlayer::new(sound_effects.swoosh.clone()));
-    
+    commands.spawn((
+        AudioPlayer::new(sound_effects.swoosh.clone()),
+        PlaybackSettings {
+            volume: Volume::Linear(0.1),
+            ..PlaybackSettings::DESPAWN
+        },
+    ));
+
     score.current = 0;
     score.scored_pipes.clear();
     
