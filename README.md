@@ -2,6 +2,9 @@
 
 A small Flappy Bird remake in Rust/Bevy with multiple modes, difficulties, themes, and save slots.
 
+Current gameplay capture:
+![Gameplay]([assets/Gampleay.png](https://github.com/AmerBidzevic/Flappy-Bird---Rust-/blob/main/assets/Gameplay.png?raw=true))
+
 ## Current features
 
 - Modes: Endless (classic scoring) and Time Attack (60s countdown). Checkpoints is listed but not implemented yet.
@@ -27,8 +30,9 @@ Place these in `assets/` (names must match exactly):
 
 ## How to run
 
-Current gameplay capture:
-![Gameplay](assets/Gampleay.png)
+- `cargo run`
+- If assets are missing, Bevy will log a path-not-found error.
+
 
 ## Rust Analyzer warning (path mismatch)
 
