@@ -2,9 +2,9 @@
   "slot_number": 1,
   "profile": {
     "name": "Player 1",
-    "high_score": 1,
-    "total_games": 9,
-    "average_score": 0.11111111,
+    "high_score": 3,
+    "total_games": 3,
+    "average_score": 1.0,
     "longest_survival": 0.0
   },
   "mode": "Endless",

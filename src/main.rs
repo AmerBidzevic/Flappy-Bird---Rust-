@@ -53,6 +53,19 @@ impl Default for PlayerProfile {
     }
 }
 
+#[derive(Resource)]
+struct SaveSelectOrigin {
+    origin_state: GameState,
+}
+
+impl Default for SaveSelectOrigin {
+    fn default() -> Self {
+        Self {
+            origin_state: GameState::MainMenu,
+        }
+    }
+}
+
 #[derive(Resource, Serialize, Deserialize, Clone)]
 struct SaveSlot {
     slot_number: u8,
@@ -187,6 +200,7 @@ fn main() {
         .init_state::<GameState>()
         .init_resource::<GameSettings>()
         .init_resource::<SaveSlotChanged>()
+        .init_resource::<SaveSelectOrigin>()
         .add_systems(Startup, (setup_save_system, setup_main_menu))
         .add_systems(OnEnter(GameState::MainMenu), setup_main_menu_ui)
         .add_systems(OnExit(GameState::MainMenu), cleanup_menu::<MainMenuMarker>)
@@ -554,9 +568,14 @@ fn main_menu_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
     settings: Res<GameSettings>,
+    mut commands: Commands,  // Add Commands parameter
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         if settings.current_slot.is_none() {
+            // Set origin to MainMenu before transitioning
+            commands.insert_resource(SaveSelectOrigin {
+                origin_state: GameState::MainMenu,
+            });
             next_state.set(GameState::SaveSelect);
         } else {
             next_state.set(GameState::Playing);
@@ -575,6 +594,7 @@ fn main_menu_system(
 fn options_system(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
+    mut commands: Commands,  // Add Commands parameter
 ) {
     if keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(GameState::MainMenu);
@@ -588,6 +608,12 @@ fn options_system(
         (KeyCode::Digit4, GameState::ThemeSelect),
     ] {
         if keyboard.just_pressed(key) {
+            if state == GameState::SaveSelect {
+                // Set origin to Options before transitioning
+                commands.insert_resource(SaveSelectOrigin {
+                    origin_state: GameState::Options,
+                });
+            }
             next_state.set(state);
             return;
         }
@@ -736,7 +762,6 @@ fn setup_save_select_ui(mut commands: Commands, asset_server: Res<AssetServer>, 
     let window_width = window.width();
     let window_height = window.height();
 
-    // Add background image
     commands.spawn((
         Sprite {
             image: asset_server.load("Background2.png"),
@@ -778,10 +803,10 @@ fn setup_save_select_ui(mut commands: Commands, asset_server: Res<AssetServer>, 
         for slot_num in 1..=3 {
             let save_data = load_save_slot(slot_num);
             let text = if let Some(save) = save_data {
-                format!("Slot {}: {} - High Score: {}", 
-                    slot_num, save.profile.name, save.profile.high_score)
+                format!("[{}] Slot {}: {} - High Score: {}", 
+                    slot_num, slot_num, save.profile.name, save.profile.high_score)
             } else {
-                format!("Slot {}: Empty", slot_num)
+                format!("[{}] Slot {}: Empty (New Player)", slot_num, slot_num)
             };
             
             parent.spawn((
@@ -836,9 +861,11 @@ fn save_select_system(
     mut next_state: ResMut<NextState<GameState>>,
     mut settings: ResMut<GameSettings>,
     mut flag: ResMut<SaveSlotChanged>,
+    origin: Res<SaveSelectOrigin>,  // Track where we came from
 ) {
     if keyboard.just_pressed(KeyCode::Escape) {
-        next_state.set(GameState::Options);
+        // Return to where we came from
+        next_state.set(origin.origin_state);
         return;
     }
     
@@ -865,7 +892,17 @@ fn save_select_system(
                 settings.selected_theme = save_data.theme;
             }
             
-            next_state.set(GameState::Options);
+            // Different transition based on origin
+            match origin.origin_state {
+                GameState::MainMenu => {
+                    // Came from MainMenu (starting game without slot) → go to Playing
+                    next_state.set(GameState::Playing);
+                }
+                _ => {
+                    // Came from Options or elsewhere → go back to MainMenu
+                    next_state.set(GameState::MainMenu);
+                }
+            }
             return;
         }
     }
@@ -875,6 +912,7 @@ fn save_select_system(
         flag.changed = true;
     }
 }
+
 
 fn refresh_save_select_ui(
     mut commands: Commands,
@@ -1795,7 +1833,7 @@ fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>, wi
     // Add background image
     commands.spawn((
         Sprite {
-            image: asset_server.load("Background2.png"),
+            image: asset_server.load("cookd.png"),
             custom_size: Some(Vec2::new(window_width, window_height)),
             ..default()
         },
