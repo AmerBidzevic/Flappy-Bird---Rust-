@@ -3,13 +3,13 @@
   "profile": {
     "name": "Player 1",
     "high_score": 3,
-    "total_games": 1,
-    "average_score": 3.0,
+    "total_games": 3,
+    "average_score": 1.0,
     "longest_survival": 0.0
   },
   "mode": "Endless",
   "difficulty": "Normal",
   "theme": "Classic",
-  "score": 3,
+  "score": 0,
   "survival_time": 0.0
 }

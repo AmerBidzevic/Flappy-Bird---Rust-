@@ -1,0 +1,15 @@
+{
+  "slot_number": 2,
+  "profile": {
+    "name": "Player 2",
+    "high_score": 11,
+    "total_games": 4,
+    "average_score": 6.75,
+    "longest_survival": 0.0
+  },
+  "mode": "TimeAttack",
+  "difficulty": "Hard",
+  "theme": "HighContrast",
+  "score": 9,
+  "survival_time": 0.0
+}
