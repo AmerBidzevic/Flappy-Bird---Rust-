@@ -17,8 +17,10 @@ enum GameState {
     ModeSelect,
     DifficultySelect,
     ThemeSelect,
+    SkinSelect,
     Playing,
     GameOver,
+    Victory,
     Leaderboard,
 }
 
@@ -31,6 +33,9 @@ enum Difficulty {Easy, Normal, Hard}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Theme {Classic, HighContrast, Minimal}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Skin {Classic, Red, Blue, Green}
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 struct PlayerProfile {
@@ -73,6 +78,7 @@ struct SaveSlot {
         mode: GameMode,
         difficulty: Difficulty,
         theme: Theme,
+        skin: Skin,
     score: u32,
     survival_time: f32,
 }
@@ -83,6 +89,7 @@ struct GameSettings {
     selected_mode: GameMode,
     selected_difficulty: Difficulty,
     selected_theme: Theme,
+    selected_skin: Skin,
 }
 
 impl Default for GameSettings {
@@ -92,6 +99,7 @@ impl Default for GameSettings {
             selected_mode: GameMode::Endless,
             selected_difficulty: Difficulty::Normal,
             selected_theme: Theme::Classic,
+            selected_skin: Skin::Classic,
         }
     }
 }
@@ -181,6 +189,36 @@ impl<'de> Deserialize<'de> for Theme {
     }
 }
 
+impl Serialize for Skin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Skin::Classic => "Classic",
+            Skin::Red => "Red",
+            Skin::Blue => "Blue",
+            Skin::Green => "Green",
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for Skin {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "Classic" => Ok(Skin::Classic),
+            "Red" => Ok(Skin::Red),
+            "Blue" => Ok(Skin::Blue),
+            "Green" => Ok(Skin::Green),
+            _ => Err(serde::de::Error::custom("Invalid skin")),
+        }
+    }
+}
+
 // ---------------------------- MAIN ----------------------------
 fn main() {
     App::new()
@@ -216,10 +254,14 @@ fn main() {
         .add_systems(OnExit(GameState::DifficultySelect), cleanup_menu::<DifficultySelectMarker>)
         .add_systems(OnEnter(GameState::ThemeSelect), setup_theme_select_ui)
         .add_systems(OnExit(GameState::ThemeSelect), cleanup_menu::<ThemeSelectMarker>)
+        .add_systems(OnEnter(GameState::SkinSelect), setup_skin_select_ui)
+        .add_systems(OnExit(GameState::SkinSelect), cleanup_menu::<SkinSelectMarker>)
         .add_systems(OnEnter(GameState::Playing), (setup_level, reset_on_play_start).chain())
         .add_systems(OnExit(GameState::Playing), cleanup_game)
         .add_systems(OnEnter(GameState::GameOver), setup_game_over_ui)
         .add_systems(OnExit(GameState::GameOver), cleanup_menu::<GameOverMarker>)
+        .add_systems(OnEnter(GameState::Victory), setup_victory_ui)
+        .add_systems(OnExit(GameState::Victory), cleanup_menu::<VictoryScreenMarker>)
         .add_systems(Update, (
             main_menu_system.run_if(in_state(GameState::MainMenu)),
             options_system.run_if(in_state(GameState::Options)),
@@ -228,11 +270,15 @@ fn main() {
             mode_select_system.run_if(in_state(GameState::ModeSelect)),
             difficulty_select_system.run_if(in_state(GameState::DifficultySelect)),
             theme_select_system.run_if(in_state(GameState::ThemeSelect)),
+            skin_select_system.run_if(in_state(GameState::SkinSelect)),
             update_bird.run_if(in_state(GameState::Playing)),
             update_obstacles.run_if(in_state(GameState::Playing)),
             update_ui.run_if(in_state(GameState::Playing)),
             update_time_attack.run_if(in_state(GameState::Playing)),
+            update_checkpoints.run_if(in_state(GameState::Playing)),
+            handle_escape_in_checkpoint.run_if(in_state(GameState::Playing)),
             handle_game_over.run_if(in_state(GameState::GameOver)),
+            handle_victory.run_if(in_state(GameState::Victory)),
             leaderboard_system.run_if(in_state(GameState::Leaderboard)),
         ))
         .run();
@@ -266,7 +312,13 @@ struct DifficultySelectMarker;
 struct ThemeSelectMarker;
 
 #[derive(Component)]
+struct SkinSelectMarker;
+
+#[derive(Component)]
 struct GameOverMarker;
+
+#[derive(Component)]
+struct VictoryScreenMarker;
 
 fn load_leaderboard() -> Vec<LeaderboardEntry> {
     let mut entries = Vec::new();
@@ -422,7 +474,7 @@ fn cleanup_game(
     mut commands: Commands,
     bird_query: Query<Entity, With<Bird>>,
     obstacle_query: Query<Entity, With<Obstacle>>,
-    ui_query: Query<Entity, Or<(With<ScoreDisplay>, With<BestScoreDisplay>, With<TimeDisplay>)>>,
+    ui_query: Query<Entity, Or<(With<ScoreDisplay>, With<BestScoreDisplay>, With<TimeDisplay>, With<CheckpointDisplay>, With<VictoryMessage>)>>,
     background_query: Query<Entity, With<Background>>,
 ) {
     // Tear down everything that belongs to a run before returning to menus
@@ -440,6 +492,7 @@ fn cleanup_game(
     }
 
     commands.remove_resource::<TimeAttackState>();
+    commands.remove_resource::<CheckpointsState>();
 }
 
 // Main Menu UI
@@ -606,6 +659,7 @@ fn options_system(
         (KeyCode::Digit2, GameState::ModeSelect),
         (KeyCode::Digit3, GameState::DifficultySelect),
         (KeyCode::Digit4, GameState::ThemeSelect),
+        (KeyCode::Digit5, GameState::SkinSelect),
     ] {
         if keyboard.just_pressed(key) {
             if state == GameState::SaveSelect {
@@ -739,7 +793,23 @@ fn setup_options_ui(mut commands: Commands, asset_server: Res<AssetServer>, wind
         ));
         
         parent.spawn((
-            Text::new("\nSelect Option [1/2/3/4]\nReturn to Main Menu [ESC]"),
+            Text::new(format!("Skin:  {:?}", settings.selected_skin)),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("\nSelect Option [1/2/3/4/5]\nReturn to Main Menu [ESC]"),
             TextFont {
                 font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
                 font_size: 24.0,
@@ -890,6 +960,13 @@ fn save_select_system(
                 settings.selected_mode = save_data.mode;
                 settings.selected_difficulty = save_data.difficulty;
                 settings.selected_theme = save_data.theme;
+                settings.selected_skin = save_data.skin;
+            } else {
+                // New slot - reset to defaults
+                settings.selected_mode = GameMode::Endless;
+                settings.selected_difficulty = Difficulty::Normal;
+                settings.selected_theme = Theme::Classic;
+                settings.selected_skin = Skin::Classic;
             }
             
             // Different transition based on origin
@@ -1337,6 +1414,168 @@ fn theme_select_system(
     }
 }
 
+fn setup_skin_select_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>) {
+    let window = window_query.single().expect("Missing primary window");
+    let window_width = window.width();
+    let window_height = window.height();
+
+    // Add background image
+    commands.spawn((
+        Sprite {
+            image: asset_server.load("Background2.png"),
+            custom_size: Some(Vec2::new(window_width, window_height)),
+            ..default()
+        },
+        Transform::from_translation(Vec3::new(0.0, 0.0, -50.0)),
+        Background,
+        SkinSelectMarker,
+    ));
+
+    commands.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        SkinSelectMarker,
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("BIRD SKIN"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 64.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(30.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("Classic [Yellow Bird]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("Red [Red Bird]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("Blue [Blue Bird]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("Green [Green Bird]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+        
+        parent.spawn((
+            Text::new("Select [1/2/3/4]\nReturn [ESC]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 24.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.5)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::top(Val::Px(40.0)),
+                ..default()
+            },
+        ));
+    });
+}
+
+fn skin_select_system(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut settings: ResMut<GameSettings>,
+) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        next_state.set(GameState::Options);
+        return;
+    }
+    
+    for (key, skin) in [
+        (KeyCode::Digit1, Skin::Classic),
+        (KeyCode::Digit2, Skin::Red),
+        (KeyCode::Digit3, Skin::Blue),
+        (KeyCode::Digit4, Skin::Green),
+    ] {
+        if keyboard.just_pressed(key) {
+            settings.selected_skin = skin;
+            next_state.set(GameState::Options);
+            return;
+        }
+    }
+}
+
+fn handle_escape_in_checkpoint(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    settings: Res<GameSettings>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if settings.selected_mode == GameMode::Checkpoints {
+        if keyboard.just_pressed(KeyCode::Escape) {
+            next_state.set(GameState::MainMenu);
+        }
+    }
+}
+
 // ---------------------------- GAMEPLAY CONSTANTS & COMPONENTS ----------------------------
 // BIRD
 const PIXEL_RATIO: f32 = 4.;
@@ -1393,6 +1632,42 @@ struct TimeAttackState {
     remaining: f32,
 }
 
+#[derive(Resource)]
+struct CheckpointsState {
+    checkpoints: Vec<u32>,
+    current_checkpoint_index: usize,
+    completed: bool,
+    last_checkpoint_score: u32,
+}
+
+impl CheckpointsState {
+    fn new(difficulty: Difficulty) -> Self {
+        let checkpoints = match difficulty {
+            Difficulty::Easy => vec![5, 10, 15, 20],
+            Difficulty::Normal => vec![10, 20, 30, 40],
+            Difficulty::Hard => vec![15, 30, 45, 60],
+        };
+        Self {
+            checkpoints,
+            current_checkpoint_index: 0,
+            completed: false,
+            last_checkpoint_score: 0,
+        }
+    }
+
+    fn target_score(&self) -> u32 {
+        if self.current_checkpoint_index < self.checkpoints.len() {
+            self.checkpoints[self.current_checkpoint_index]
+        } else {
+            self.checkpoints.last().copied().unwrap_or(0)
+        }
+    }
+
+    fn is_final_checkpoint(&self) -> bool {
+        self.current_checkpoint_index >= self.checkpoints.len() - 1
+    }
+}
+
 #[derive(Resource, Clone, Copy)]
 struct DifficultyTuning {
     gap_size: f32,
@@ -1441,6 +1716,12 @@ struct BestScoreDisplay;
 
 #[derive(Component)]
 struct TimeDisplay;
+
+#[derive(Component)]
+struct CheckpointDisplay;
+
+#[derive(Component)]
+struct VictoryMessage;
 
 #[derive(Component)]
 struct Background;
@@ -1502,6 +1783,31 @@ fn setup_level(
             TimeDisplay,
         ));
     }
+
+    // Checkpoints setup: initialize checkpoint state and show UI
+    if settings.selected_mode == GameMode::Checkpoints {
+        let checkpoints_state = CheckpointsState::new(settings.selected_difficulty);
+        let target = checkpoints_state.target_score();
+        commands.insert_resource(checkpoints_state);
+
+        commands.spawn((
+            Text::new(format!("Checkpoint: 0/{}", target)),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 22.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextShadow::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(15.0),
+                left: Val::Percent(45.0),
+                ..default()
+            },
+            CheckpointDisplay,
+        ));
+    }
     
     // Apply theme background; Classic uses a full-screen texture instead of a flat color
     match settings.selected_theme {
@@ -1534,9 +1840,17 @@ fn setup_level(
         }
     }
 
+    // Spawn bird with selected skin
+    let bird_sprite = match settings.selected_skin {
+        Skin::Classic => "bird.png",
+        Skin::Red => "red_bird.png",
+        Skin::Blue => "blue_bird.png",
+        Skin::Green => "green_bird.png",
+    };
+
     commands.spawn((
         Sprite {
-            image: asset_server.load("bird.png"),
+            image: asset_server.load(bird_sprite),
             ..Default::default()
         },
         Transform::IDENTITY.with_scale(Vec3::splat(PIXEL_RATIO)),
@@ -1678,6 +1992,7 @@ fn update_bird(
     mut state: ResMut<NextState<GameState>>,
     settings: Res<GameSettings>,
     tuning: Res<DifficultyTuning>,
+    checkpoints_state: Option<ResMut<CheckpointsState>>,
 ) {
     if let Ok((mut bird, mut transform)) = bird_query.single_mut() {
         // Input + physics
@@ -1743,6 +2058,17 @@ fn update_bird(
             }
             ));
 
+            // Handle Checkpoints mode respawn
+            if settings.selected_mode == GameMode::Checkpoints {
+                if let Some(cp_state) = checkpoints_state {
+                    // Reset score to last checkpoint and respawn
+                    score.current = cp_state.last_checkpoint_score;
+                    bird.velocity = 0.0;
+                    transform.translation.y = 0.0;
+                    return; // Don't go to game over, just respawn
+                }
+            }
+
             // Save game data
             if let Some(slot_num) = settings.current_slot {
                  let save_data = load_save_slot(slot_num as u32);
@@ -1767,6 +2093,7 @@ fn update_bird(
                     mode: settings.selected_mode,
                     difficulty: settings.selected_difficulty,
                     theme: settings.selected_theme,
+                    skin: settings.selected_skin,
                     score: score.current,
                     survival_time: 0.0,
                 };
@@ -1813,6 +2140,60 @@ fn update_time_attack(
 
     if timer.remaining <= 0.0 {
         next_state.set(GameState::GameOver);
+    }
+}
+
+fn update_checkpoints(
+    mut commands: Commands,
+    settings: Res<GameSettings>,
+    checkpoints: Option<ResMut<CheckpointsState>>,
+    score: Res<Score>,
+    sound_effects: Res<SoundEffects>,
+    mut checkpoint_ui: Query<&mut Text, With<CheckpointDisplay>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if settings.selected_mode != GameMode::Checkpoints {
+        return;
+    }
+
+    let Some(mut checkpoints_state) = checkpoints else { return; };
+    
+    // Update UI
+    if let Some(mut txt) = checkpoint_ui.iter_mut().next() {
+        let target = checkpoints_state.target_score();
+        txt.0 = format!("Checkpoint: {}/{}", score.current, target);
+    }
+
+    // Check if player reached current checkpoint
+    if !checkpoints_state.completed && score.current >= checkpoints_state.target_score() {
+        // Play checkpoint sound
+        commands.spawn((
+            AudioPlayer::new(sound_effects.swoosh.clone()),
+            PlaybackSettings {
+                volume: Volume::Linear(0.2),
+                ..PlaybackSettings::DESPAWN
+            }
+        ));
+
+        // Save this checkpoint as the respawn point
+        checkpoints_state.last_checkpoint_score = checkpoints_state.target_score();
+
+        if checkpoints_state.is_final_checkpoint() {
+            // Final checkpoint reached - Victory!
+            checkpoints_state.completed = true;
+            
+            // Transition to victory screen
+            next_state.set(GameState::Victory);
+        } else {
+            // Move to next checkpoint
+            checkpoints_state.current_checkpoint_index += 1;
+            
+            // Update UI with new target
+            if let Some(mut txt) = checkpoint_ui.iter_mut().next() {
+                let new_target = checkpoints_state.target_score();
+                txt.0 = format!("Checkpoint: {}/{}", score.current, new_target);
+            }
+        }
     }
 }
 
@@ -1918,6 +2299,119 @@ fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>, wi
             },
         ));
     });
+}
+
+fn setup_victory_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>, score: Res<Score>) {
+    let window = window_query.single().expect("Missing primary window");
+    let window_width = window.width();
+    let window_height = window.height();
+
+    // Background with celebration theme
+    commands.spawn((
+        Sprite {
+            image: asset_server.load("Background2.png"),
+            custom_size: Some(Vec2::new(window_width, window_height)),
+            ..default()
+        },
+        Transform::from_translation(Vec3::new(0.0, 0.0, -50.0)),
+        Background,
+        VictoryScreenMarker,
+    ));
+
+    // Play menu music for celebration
+    commands.spawn((
+        AudioPlayer::new(asset_server.load("35-Lost-Woods.ogg")),
+        PlaybackSettings {
+            volume: Volume::Linear(0.1),
+            ..PlaybackSettings::LOOP
+        },
+        VictoryScreenMarker,
+    ));
+
+    // Victory screen UI
+    commands.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        VictoryScreenMarker,
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("🎉 VICTORY! 🎉"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 64.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.84, 0.0)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(30.0)),
+                ..default()
+            },
+        ));
+
+        parent.spawn((
+            Text::new("ALL CHECKPOINTS COMPLETED!"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.2, 1.0, 0.4)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+
+        parent.spawn((
+            Text::new(format!("FINAL SCORE: {}", score.current)),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 40.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.85, 0.95, 1.0)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+        ));
+
+        parent.spawn((
+            Text::new("RETURN TO MAIN MENU [SPACE]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 24.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::top(Val::Px(40.0)),
+                ..default()
+            },
+        ));
+    });
+}
+
+fn handle_victory(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    if keyboard.just_pressed(KeyCode::Space) {
+        next_state.set(GameState::MainMenu);
+    }
 }
 
 fn reset_on_play_start(
