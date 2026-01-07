@@ -2,10 +2,13 @@
 
 Flappy Bird built in Bevy (using Rust language) with multiple modes, difficulties, themes, skins, saving feature.
 
-![Gameplay](https://github.com/AmerBidzevic/Flappy-Bird---Rust-/blob/main/assets/Gameplay.png?raw=true)
+![Gameplay](assets/Gameplay.png)
+
+## How to run
+
+> In console: `cargo run`
 
 ## Current features
-
 ### Modes
 - Endless - Classic style of playing.
 - Time Attack - 60s time rush, survive until timeout.
@@ -16,8 +19,8 @@ Flappy Bird built in Bevy (using Rust language) with multiple modes, difficultie
 - Hard - Smaller Gaps, Fast, High Gravity.
 ### Themes
 - Classic - Original Look (Like in Main Menu).
-HighContrast - Enhanced Visibility / Dark mode.
-Minimal - Basic flat gray color.
+- HighContrast - Enhanced Visibility / Dark mode.
+- Minimal - Basic flat gray color.
 ### Saves
 - Three slots, selectable on start. Slots can be deleted. Per-run scores update the profile high score and averages(also visible in Leaderboard)
 ### User Interface 
@@ -33,10 +36,3 @@ Minimal - Basic flat gray color.
 - Ctrl + (1/2/3): Delete the corresponding save slot in the Save Select menu.
 ### Saving
 - Files live in `saves/slot_<n>.json` (1–3). Each run updates high score, total games, and average score for the selected slot. Saves are simple JSON; you can delete them manually or via the in-game shortcut.
-
-## Assets needed
-Place these in `assets/` (names must match exactly):
-
-## How to run
-
-- In console: `cargo run`
