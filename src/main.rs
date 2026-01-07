@@ -7,7 +7,23 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+// ---------------------------- GAMEPLAY CONSTANTS & COMPONENTS ----------------------------
+// BIRD
+const PIXEL_RATIO: f32 = 4.;
+const FLAP_FORCE: f32 = 500.;
+const GRAVITY: f32 = 2000.;
+const VELOCITY_TO_ROTATION_RATIO: f32 = 7.5;
+//OBSTACLE
+const OBSTACLE_AMOUNT: i32 = 5;
+const OBSTACLE_WIDTH: f32 = 32.;
+const OBSTACLE_HEIGHT: f32 = 144.;
+const OBSTACLE_VERTICAL_OFFSET: f32 = 8.;
+const OBSTACLE_GAP_SIZE: f32 = 25.;
+const OBSTACLE_SPACING: f32 = 60.;
+const OBSTACLE_SCROLL_SPEED: f32 = 150.;
+
 // ---------------------------- STATES ----------------------------
+// Game screens (states) switched between during app run
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum GameState {
     #[default]
@@ -25,6 +41,7 @@ enum GameState {
 }
 
 // ---------------------------- GAME SETTINGS ----------------------------
+// Specific state options
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GameMode {Endless, TimeAttack, Checkpoints}
 
@@ -46,29 +63,9 @@ struct PlayerProfile {
     longest_survival: f32,
 }
 
-impl Default for PlayerProfile {
-    fn default() -> Self {
-        Self {
-            name: String::from("Player"),
-            high_score: 0,
-            total_games: 0,
-            average_score: 0.0,
-            longest_survival: 0.0,
-        }
-    }
-}
-
 #[derive(Resource)]
 struct SaveSelectOrigin {
     origin_state: GameState,
-}
-
-impl Default for SaveSelectOrigin {
-    fn default() -> Self {
-        Self {
-            origin_state: GameState::MainMenu,
-        }
-    }
 }
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
@@ -92,6 +89,143 @@ struct GameSettings {
     selected_skin: Skin,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct LeaderboardEntry {
+    name: String,
+    score: u32,
+    mode: GameMode,
+    difficulty: Difficulty,
+}
+
+#[derive(Component)]
+struct MainMenuMarker;
+
+#[derive(Component)]
+struct OptionsMarker;
+
+#[derive(Component)]
+struct SaveSelectMarker;
+
+#[derive(Component)]
+struct ModeSelectMarker;
+
+#[derive(Component)]
+struct DifficultySelectMarker;
+
+#[derive(Component)]
+struct ThemeSelectMarker;
+
+#[derive(Component)]
+struct SkinSelectMarker;
+
+#[derive(Component)]
+struct GameOverMarker;
+
+#[derive(Component)]
+struct VictoryScreenMarker;
+
+#[derive(Component)]
+struct LeaderboardMarker;
+
+#[derive(Resource, Default)]
+struct SaveSlotChanged {
+    changed: bool,
+}
+
+#[derive(Resource)]
+pub struct Score {
+    pub current: u32,
+    pub best: u32,
+    pub scored_pipes: Vec<Entity>,
+}
+
+#[derive(Resource)]
+pub struct GameManager {
+    pub pipe_image: Handle<Image>,
+    pub window_dimensions: Vec2,
+}
+
+#[derive(Resource)]
+pub struct SoundEffects {
+    pub flap: Handle<AudioSource>,
+    pub point: Handle<AudioSource>,
+    pub die: Handle<AudioSource>,
+    pub swoosh: Handle<AudioSource>,
+}
+
+#[derive(Resource)]
+struct TimeAttackState {
+    remaining: f32,
+}
+
+#[derive(Resource)]
+struct CheckpointsState {
+    checkpoints: Vec<u32>,
+    current_checkpoint_index: usize,
+    completed: bool,
+    last_checkpoint_score: u32,
+}
+
+#[derive(Resource, Clone, Copy)]
+struct DifficultyTuning {
+    gap_size: f32,
+    scroll_speed: f32,
+    gravity_mult: f32,
+    flap_mult: f32,
+    vertical_offset: f32,
+}
+
+#[derive(Component)]
+struct Bird {
+    pub velocity: f32,
+}
+
+#[derive(Component)]
+struct ScoreDisplay;
+
+#[derive(Component)]
+struct BestScoreDisplay;
+
+#[derive(Component)]
+struct TimeDisplay;
+
+#[derive(Component)]
+struct CheckpointDisplay;
+
+#[derive(Component)]
+struct VictoryMessage;
+
+#[derive(Component)]
+struct Background;
+
+#[derive(Component)]
+struct Obstacle {
+    pipe_direction: f32,
+    scored: bool,
+}
+
+// ---------------------------- IMPLEMENTATIONS ----------------------------
+// Defines main funcionalities for default values
+impl Default for PlayerProfile {
+    fn default() -> Self {
+        Self {
+            name: String::from("Player"),
+            high_score: 0,
+            total_games: 0,
+            average_score: 0.0,
+            longest_survival: 0.0,
+        }
+    }
+}
+
+impl Default for SaveSelectOrigin {
+    fn default() -> Self {
+        Self {
+            origin_state: GameState::MainMenu,
+        }
+    }
+}
+
 impl Default for GameSettings {
     fn default() -> Self {
         Self {
@@ -104,7 +238,46 @@ impl Default for GameSettings {
     }
 }
 
-// ---------------------------- SERIALIZATION ----------------------------
+impl Default for Score {
+    fn default() -> Self {
+        Self {
+            current: 0,
+            best: 0,
+            scored_pipes: Vec::new(),
+        }
+    }
+}
+
+impl CheckpointsState {
+    fn new(difficulty: Difficulty) -> Self {
+        let checkpoints = match difficulty {
+            Difficulty::Easy => vec![5, 10, 15, 20],
+            Difficulty::Normal => vec![10, 20, 30, 40],
+            Difficulty::Hard => vec![15, 30, 45, 60],
+        };
+        Self {
+            checkpoints,
+            current_checkpoint_index: 0,
+            completed: false,
+            last_checkpoint_score: 0,
+        }
+    }
+
+    fn target_score(&self) -> u32 {
+        if self.current_checkpoint_index < self.checkpoints.len() {
+            self.checkpoints[self.current_checkpoint_index]
+        } else {
+            self.checkpoints.last().copied().unwrap_or(0)
+        }
+    }
+
+    fn is_final_checkpoint(&self) -> bool {
+        self.current_checkpoint_index >= self.checkpoints.len() - 1
+    }
+}
+
+// ----------------- SERIALIZATION & DESERIALIZATION ---------------
+// Custom serialization/deserialization for enums
 impl Serialize for GameMode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -220,6 +393,7 @@ impl<'de> Deserialize<'de> for Skin {
 }
 
 // ---------------------------- MAIN ----------------------------
+// Entry point of the application, adding each system and updating accordingly
 fn main() {
     App::new()
         .add_plugins(
@@ -284,42 +458,6 @@ fn main() {
         .run();
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-struct LeaderboardEntry {
-    name: String,
-    score: u32,
-    mode: GameMode,
-    difficulty: Difficulty,
-}
-
-// Marker components for menu cleanup
-#[derive(Component)]
-struct MainMenuMarker;
-
-#[derive(Component)]
-struct OptionsMarker;
-
-#[derive(Component)]
-struct SaveSelectMarker;
-
-#[derive(Component)]
-struct ModeSelectMarker;
-
-#[derive(Component)]
-struct DifficultySelectMarker;
-
-#[derive(Component)]
-struct ThemeSelectMarker;
-
-#[derive(Component)]
-struct SkinSelectMarker;
-
-#[derive(Component)]
-struct GameOverMarker;
-
-#[derive(Component)]
-struct VictoryScreenMarker;
-
 fn load_leaderboard() -> Vec<LeaderboardEntry> {
     let mut entries = Vec::new();
 
@@ -338,9 +476,6 @@ fn load_leaderboard() -> Vec<LeaderboardEntry> {
     entries.sort_by(|a, b| b.score.cmp(&a.score));
     entries
 }
-
-#[derive(Component)]
-struct LeaderboardMarker;
 
 fn setup_leaderboard_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>) {
     let entries = load_leaderboard();
@@ -990,7 +1125,6 @@ fn save_select_system(
     }
 }
 
-
 fn refresh_save_select_ui(
     mut commands: Commands,
     query: Query<Entity, With<SaveSelectMarker>>,
@@ -1576,107 +1710,6 @@ fn handle_escape_in_checkpoint(
     }
 }
 
-// ---------------------------- GAMEPLAY CONSTANTS & COMPONENTS ----------------------------
-// BIRD
-const PIXEL_RATIO: f32 = 4.;
-const FLAP_FORCE: f32 = 500.;
-const GRAVITY: f32 = 2000.;
-const VELOCITY_TO_ROTATION_RATIO: f32 = 7.5;
-//OBSTACLE
-const OBSTACLE_AMOUNT: i32 = 5;
-const OBSTACLE_WIDTH: f32 = 32.;
-const OBSTACLE_HEIGHT: f32 = 144.;
-const OBSTACLE_VERTICAL_OFFSET: f32 = 8.;  // Reduced to ensure gap stays passable
-const OBSTACLE_GAP_SIZE: f32 = 25.;  // Increased from 15 to make gap larger
-const OBSTACLE_SPACING: f32 = 60.;
-const OBSTACLE_SCROLL_SPEED: f32 = 150.;
-
-#[derive(Resource, Default)]
-struct SaveSlotChanged {
-    changed: bool,
-}
-
-#[derive(Resource)]
-pub struct Score {
-    pub current: u32,
-    pub best: u32,
-    pub scored_pipes: Vec<Entity>,
-}
-
-impl Default for Score {
-    fn default() -> Self {
-        Self {
-            current: 0,
-            best: 0,
-            scored_pipes: Vec::new(),
-        }
-    }
-}
-
-#[derive(Resource)]
-pub struct GameManager {
-    pub pipe_image: Handle<Image>,
-    pub window_dimensions: Vec2,
-}
-
-#[derive(Resource)]
-pub struct SoundEffects {
-    pub flap: Handle<AudioSource>,
-    pub point: Handle<AudioSource>,
-    pub die: Handle<AudioSource>,
-    pub swoosh: Handle<AudioSource>,
-}
-
-#[derive(Resource)]
-struct TimeAttackState {
-    remaining: f32,
-}
-
-#[derive(Resource)]
-struct CheckpointsState {
-    checkpoints: Vec<u32>,
-    current_checkpoint_index: usize,
-    completed: bool,
-    last_checkpoint_score: u32,
-}
-
-impl CheckpointsState {
-    fn new(difficulty: Difficulty) -> Self {
-        let checkpoints = match difficulty {
-            Difficulty::Easy => vec![5, 10, 15, 20],
-            Difficulty::Normal => vec![10, 20, 30, 40],
-            Difficulty::Hard => vec![15, 30, 45, 60],
-        };
-        Self {
-            checkpoints,
-            current_checkpoint_index: 0,
-            completed: false,
-            last_checkpoint_score: 0,
-        }
-    }
-
-    fn target_score(&self) -> u32 {
-        if self.current_checkpoint_index < self.checkpoints.len() {
-            self.checkpoints[self.current_checkpoint_index]
-        } else {
-            self.checkpoints.last().copied().unwrap_or(0)
-        }
-    }
-
-    fn is_final_checkpoint(&self) -> bool {
-        self.current_checkpoint_index >= self.checkpoints.len() - 1
-    }
-}
-
-#[derive(Resource, Clone, Copy)]
-struct DifficultyTuning {
-    gap_size: f32,
-    scroll_speed: f32,
-    gravity_mult: f32,
-    flap_mult: f32,
-    vertical_offset: f32,
-}
-
 fn difficulty_tuning(difficulty: Difficulty) -> DifficultyTuning {
     match difficulty {
         Difficulty::Easy => DifficultyTuning {
@@ -1701,35 +1734,6 @@ fn difficulty_tuning(difficulty: Difficulty) -> DifficultyTuning {
             vertical_offset: OBSTACLE_VERTICAL_OFFSET * 1.2,
         },
     }
-}
-
-#[derive(Component)]
-struct Bird {
-    pub velocity: f32,
-}
-
-#[derive(Component)]
-struct ScoreDisplay;
-
-#[derive(Component)]
-struct BestScoreDisplay;
-
-#[derive(Component)]
-struct TimeDisplay;
-
-#[derive(Component)]
-struct CheckpointDisplay;
-
-#[derive(Component)]
-struct VictoryMessage;
-
-#[derive(Component)]
-struct Background;
-
-#[derive(Component)]
-struct Obstacle {
-    pipe_direction: f32,
-    scored: bool,
 }
 
 fn setup_level(
