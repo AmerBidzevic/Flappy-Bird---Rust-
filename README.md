@@ -25,7 +25,7 @@ Flappy Bird built in Bevy (using Rust language) with multiple modes, difficultie
 - Three slots, selectable on start. Slots can be deleted. Per-run scores update the profile high score and averages(also visible in Leaderboard)
 ### User Interface 
 - Start Game
-- Options (Saves, Game Mode, Difficult, Theme, Skin)
+- Options (Saves, Game Mode, Difficulty, Theme, Skin)
 - Leaderboard
 ### Audio
 - Flap/point/die/swoosh effects. 

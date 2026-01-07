@@ -22,6 +22,8 @@ const OBSTACLE_GAP_SIZE: f32 = 25.;
 const OBSTACLE_SPACING: f32 = 60.;
 const OBSTACLE_SCROLL_SPEED: f32 = 150.;
 
+const LEADERBOARD_FILE: &str = "saves/leaderboard.json";
+
 // ---------------------------- STATES ----------------------------
 // Game screens (states) switched between during app run
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -42,6 +44,18 @@ enum GameState {
 
 // ---------------------------- GAME SETTINGS ----------------------------
 // Specific state options
+#[derive(Resource, Default)]
+struct LeaderboardSaveState {
+    is_saving: bool,
+    current_name: String,
+}
+
+#[derive(Component)]
+struct LeaderboardSaveMarker;
+
+#[derive(Component)]
+struct NameInputMarker;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GameMode {Endless, TimeAttack, Checkpoints}
 
@@ -413,6 +427,7 @@ fn main() {
         .init_resource::<GameSettings>()
         .init_resource::<SaveSlotChanged>()
         .init_resource::<SaveSelectOrigin>()
+        .init_resource::<LeaderboardSaveState>() 
         .add_systems(Startup, (setup_save_system, setup_main_menu))
         .add_systems(OnEnter(GameState::MainMenu), setup_main_menu_ui)
         .add_systems(OnExit(GameState::MainMenu), cleanup_menu::<MainMenuMarker>)
@@ -453,28 +468,47 @@ fn main() {
             handle_escape_in_checkpoint.run_if(in_state(GameState::Playing)),
             handle_game_over.run_if(in_state(GameState::GameOver)),
             handle_victory.run_if(in_state(GameState::Victory)),
+            handle_name_input.run_if(in_state(GameState::GameOver)), 
             leaderboard_system.run_if(in_state(GameState::Leaderboard)),
         ))
         .run();
 }
 
-fn load_leaderboard() -> Vec<LeaderboardEntry> {
-    let mut entries = Vec::new();
-
-    for slot in 1..=3 {
-        if let Some(save) = load_save_slot(slot) {
-            entries.push(LeaderboardEntry {
-                name: save.profile.name.clone(),
-                score: save.score,
-                mode: save.mode,
-                difficulty: save.difficulty,
-            });
+fn load_leaderboard_from_file() -> Vec<LeaderboardEntry> {
+    let path = LEADERBOARD_FILE;
+    
+    if Path::new(path).exists() {
+        if let Ok(contents) = fs::read_to_string(path) {
+            return serde_json::from_str(&contents).unwrap_or_else(|_| Vec::new());
         }
     }
+    Vec::new()
+}
 
-    // Sort descending by score
+fn save_leaderboard_to_file(entries: &[LeaderboardEntry]) -> Result<(), Box<dyn std::error::Error>> {
+    let path = LEADERBOARD_FILE;
+    let json = serde_json::to_string_pretty(entries)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+fn add_to_leaderboard(entry: LeaderboardEntry) -> Result<(), Box<dyn std::error::Error>> {
+    let mut entries = load_leaderboard_from_file();
+    entries.push(entry);
+    
+    // Sort by score descending
     entries.sort_by(|a, b| b.score.cmp(&a.score));
-    entries
+    
+    // Keep only top 10 entries
+    if entries.len() > 10 {
+        entries.truncate(10);
+    }
+    
+    save_leaderboard_to_file(&entries)
+}
+
+fn load_leaderboard() -> Vec<LeaderboardEntry> {
+    load_leaderboard_from_file()
 }
 
 fn setup_leaderboard_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>) {
@@ -2204,18 +2238,243 @@ fn update_checkpoints(
 fn handle_game_over(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut next_state: ResMut<NextState<GameState>>,
+    score: Res<Score>,
+    mut leaderboard_state: ResMut<LeaderboardSaveState>,
+    settings: Res<GameSettings>,
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,  // Add this parameter
+    game_over_query: Query<Entity, With<GameOverMarker>>,  // Add this query
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
         next_state.set(GameState::MainMenu);
+        leaderboard_state.is_saving = false;
+        leaderboard_state.current_name.clear();
+    } else if keyboard.just_pressed(KeyCode::KeyS) && !leaderboard_state.is_saving {
+        // Start leaderboard save process
+        leaderboard_state.is_saving = true;
+        leaderboard_state.current_name.clear();
+        
+        // Clear existing game over UI using the query
+        for entity in &game_over_query {
+            commands.entity(entity).despawn();
+        }
+        
+        // Create name input UI
+        setup_name_input_ui(commands, asset_server, settings, score);
     }
 }
+
+fn setup_name_input_ui(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    settings: Res<GameSettings>,
+    score: Res<Score>,
+) {
+    commands.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        GameOverMarker,
+        NameInputMarker,
+    ))
+    .with_children(|parent| {
+        parent.spawn((
+            Text::new("SAVE TO LEADERBOARD"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 48.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(30.0)),
+                ..default()
+            },
+        ));
+
+        parent.spawn((
+            Text::new(format!("Score: {} - Mode: {:?} - Difficulty: {:?}", 
+                score.current, settings.selected_mode, settings.selected_difficulty)),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 24.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.9, 0.9, 0.9)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.3)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+        ));
+
+        parent.spawn((
+            Text::new("Enter 3-letter name (A-Z):"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 32.0,
+                ..default()
+            },
+            TextColor(Color::srgb(1.0, 0.992, 0.816)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+
+        // Name display (will be updated)
+        parent.spawn((
+            Text::new("___"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 48.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.2, 1.0, 0.4)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.5)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(30.0)),
+                padding: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+            LeaderboardSaveMarker,
+        ));
+
+        parent.spawn((
+            Text::new("Type A-Z to enter letters\nPress ENTER when done (3 letters required)\nPress ESC to cancel"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.8, 0.8, 0.8)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::top(Val::Px(30.0)),
+                ..default()
+            },
+        ));
+    });
+}
+
+fn handle_name_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut leaderboard_state: ResMut<LeaderboardSaveState>,
+    mut next_state: ResMut<NextState<GameState>>,
+    score: Res<Score>,
+    settings: Res<GameSettings>,
+    mut text_query: Query<&mut Text, With<LeaderboardSaveMarker>>,
+) {
+    if leaderboard_state.is_saving {
+        // Handle letter input (A-Z)
+        for key in [
+            KeyCode::KeyA, KeyCode::KeyB, KeyCode::KeyC, KeyCode::KeyD, KeyCode::KeyE,
+            KeyCode::KeyF, KeyCode::KeyG, KeyCode::KeyH, KeyCode::KeyI, KeyCode::KeyJ,
+            KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyM, KeyCode::KeyN, KeyCode::KeyO,
+            KeyCode::KeyP, KeyCode::KeyQ, KeyCode::KeyR, KeyCode::KeyS, KeyCode::KeyT,
+            KeyCode::KeyU, KeyCode::KeyV, KeyCode::KeyW, KeyCode::KeyX, KeyCode::KeyY,
+            KeyCode::KeyZ,
+        ] {
+            if keyboard.just_pressed(key) && leaderboard_state.current_name.len() < 3 {
+                let letter = match key {
+                    KeyCode::KeyA => 'A',
+                    KeyCode::KeyB => 'B',
+                    KeyCode::KeyC => 'C',
+                    KeyCode::KeyD => 'D',
+                    KeyCode::KeyE => 'E',
+                    KeyCode::KeyF => 'F',
+                    KeyCode::KeyG => 'G',
+                    KeyCode::KeyH => 'H',
+                    KeyCode::KeyI => 'I',
+                    KeyCode::KeyJ => 'J',
+                    KeyCode::KeyK => 'K',
+                    KeyCode::KeyL => 'L',
+                    KeyCode::KeyM => 'M',
+                    KeyCode::KeyN => 'N',
+                    KeyCode::KeyO => 'O',
+                    KeyCode::KeyP => 'P',
+                    KeyCode::KeyQ => 'Q',
+                    KeyCode::KeyR => 'R',
+                    KeyCode::KeyS => 'S',
+                    KeyCode::KeyT => 'T',
+                    KeyCode::KeyU => 'U',
+                    KeyCode::KeyV => 'V',
+                    KeyCode::KeyW => 'W',
+                    KeyCode::KeyX => 'X',
+                    KeyCode::KeyY => 'Y',
+                    KeyCode::KeyZ => 'Z',
+                    _ => '?',
+                };
+                
+                leaderboard_state.current_name.push(letter);
+                
+                // Update display
+                for mut text in &mut text_query {
+                    let display_name = format!("{:_<3}", leaderboard_state.current_name);
+                    text.0 = display_name;
+                }
+            }
+        }
+        
+        // Handle backspace
+        if keyboard.just_pressed(KeyCode::Backspace) && !leaderboard_state.current_name.is_empty() {
+            leaderboard_state.current_name.pop();
+            
+            // Update display
+            for mut text in &mut text_query {
+                let display_name = format!("{:_<3}", leaderboard_state.current_name);
+                text.0 = display_name;
+            }
+        }
+        
+        // Handle Enter to save
+        if keyboard.just_pressed(KeyCode::Enter) {
+            if leaderboard_state.current_name.len() == 3 {
+                // Create leaderboard entry
+                let entry = LeaderboardEntry {
+                    name: leaderboard_state.current_name.clone(),
+                    score: score.current,
+                    mode: settings.selected_mode,
+                    difficulty: settings.selected_difficulty,
+                };
+                
+                // Save to file
+                if let Err(e) = add_to_leaderboard(entry) {
+                    eprintln!("Failed to save to leaderboard: {}", e);
+                }
+                
+                // Reset state and return to main menu
+                leaderboard_state.is_saving = false;
+                leaderboard_state.current_name.clear();
+                next_state.set(GameState::MainMenu);
+            }
+        }
+        
+        // Handle Escape to cancel
+        if keyboard.just_pressed(KeyCode::Escape) {
+            leaderboard_state.is_saving = false;
+            leaderboard_state.current_name.clear();
+            next_state.set(GameState::MainMenu);
+        }
+    }
+}
+
+
 
 fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>, window_query: Query<&Window, With<PrimaryWindow>>, score: Res<Score>) {
     let window = window_query.single().expect("Missing primary window");
     let window_width = window.width();
     let window_height = window.height();
 
-    // Add background image
     commands.spawn((
         Sprite {
             image: asset_server.load("cookd.png"),
@@ -2227,7 +2486,6 @@ fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>, wi
         GameOverMarker,
     ));
 
-    // Simple summary screen after a run ends
     commands.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -2283,6 +2541,23 @@ fn setup_game_over_ui(mut commands: Commands, asset_server: Res<AssetServer>, wi
             TextShadow::default(),
             Node {
                 margin: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+        ));
+
+        // ADD THIS NEW OPTION
+        parent.spawn((
+            Text::new("SAVE TO LEADERBOARD [S]"),
+            TextFont {
+                font: asset_server.load("fonts/BBHHegarty-Regular.ttf"),
+                font_size: 28.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.2, 1.0, 0.4)),
+            TextBackgroundColor(Color::BLACK.with_alpha(0.2)),
+            TextShadow::default(),
+            Node {
+                margin: UiRect::all(Val::Px(15.0)),
                 ..default()
             },
         ));
